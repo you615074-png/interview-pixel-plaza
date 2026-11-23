@@ -515,7 +515,7 @@ const UI = (function () {
     const R = REAL.requirements;
     const interviewCount = JOBS.filter(interviewable).length;
     open('成果展馆', `
-      <p class="lead">这里展示需求落定的结果、从复盘里整理出的总结，以及网站和项目的进度。</p>
+      <p class="lead">这里只展示已经完成的结果：需求落定的交付物与决定、从复盘里整理出的总结，以及网站的完成进度。</p>
       <div class="stat-row">
         <div class="stat"><b>${JOBS.length}</b><span>真实岗位</span></div>
         <div class="stat"><b>${interviewCount}</b><span>可模拟问答</span></div>
@@ -528,17 +528,12 @@ const UI = (function () {
       <div class="cards2">${R.deliverables.map(x => `<div class="mini"><b>${esc(x.t)}</b><span class="pill ${pillCls(x.status)}">${esc(x.status)}</span><p>${esc(x.d)}</p></div>`).join('')}</div>
       <h3>数据怎么来</h3>
       <ol class="steps">${R.pipeline.map(x => `<li><b>${esc(x.t)}：</b>${esc(x.d)}</li>`).join('')}</ol>
-      <h3>还没拍板的问题</h3>
-      <ul class="todo-list">${R.open_questions.map(x => `<li><span class="pill ${pillCls(x.status)}">${esc(x.status)}</span><div><p>${esc(x.t)}</p></div></li>`).join('')}</ul>
-      <h3>待办</h3>
-      <ul class="todo-list">${R.todo.map(x => `<li><span class="pill ${pillCls(x.status)}">${esc(x.status)}</span><div><b>${esc(x.t)}</b><p>负责人：${esc(x.owner)}</p></div></li>`).join('')}</ul>
+      <h3>已定的事项</h3>
+      <ul class="todo-list">${R.open_questions.map(x => `<li><span class="pill ok">${esc(x.status)}</span><div><p>${esc(x.t)}</p></div></li>`).join('')}</ul>
       <p class="hint">${esc(R.mvp)}</p>
 
-      <h3>🪞 复盘总结（通用经验）</h3>
+      <h3>🪞 复盘总结（已完成的复盘）</h3>
       <div class="cards2">${REAL.lessons.map(x => `<div class="mini"><b>${esc(x.t)}</b><p>${esc(x.d)}</p></div>`).join('')}</div>
-      <h3>改进计划</h3>
-      <div class="cards2">${REAL.plan.map(p => `<div class="mini"><b>${esc(p.period)}</b><ul class="plain">${p.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>`).join('')}</div>
-
       <h3>✅ 网站进度</h3>
       <div class="cards2">${PROJECT_DONE.map(x => `<div class="mini done"><b>${esc(x.t)}</b><p>${esc(x.d)}</p></div>`).join('')}</div>
 
