@@ -32,7 +32,7 @@ const UI = (function () {
     role: store.get('iq.role'),              // 'candidate' | 'interviewer'
     results: store.get('iq.results') || {},  // jobId -> 报告摘要
     last: store.get('iq.last'),              // 最近一份报告
-    session: null                            // 进行中的模拟面试
+    session: null                            // 当前的模拟面试
   };
 
   /* ---------- 面板基础 ---------- */
@@ -45,7 +45,7 @@ const UI = (function () {
   }
   function close() { panel.hidden = true; panelBody.innerHTML = ''; }
   const blocking = () => !panel.hidden || World.talking();
-  const noData = () => `<p class="lead">真实数据还没有加载。请在本地运行 <code>python3 tools/build_real_data.py</code>，或等待线上版本部署完成。</p>`;
+  const noData = () => `<p class="lead">真实数据未加载。请在本地运行 <code>python3 tools/build_real_data.py</code>，或等待线上版本部署完成。</p>`;
 
   function route(go, d) {
     if (go === 'careers') openCareers(d.cat);
@@ -114,7 +114,7 @@ const UI = (function () {
             <div class="card-title">${esc(j.title)}</div>
             <div class="card-sub">${esc(j.org)}</div>
             <div class="tags">${j.tags.map(t => `<span>${esc(t)}</span>`).join('')}</div>
-            <div class="verdict-line ${verdictCls(j.verdict ? (j.verdict.indexOf('通过') >= 0 || j.verdict.indexOf('进入下一轮') >= 0 ? '能用' : j.verdict.indexOf('补充考察') >= 0 ? '待观察' : '') : '')}">${esc(j.verdict || '复盘结论待整理')}</div>
+            <div class="verdict-line ${verdictCls(j.verdict ? (j.verdict.indexOf('通过') >= 0 || j.verdict.indexOf('进入下一轮') >= 0 ? '能用' : j.verdict.indexOf('补充考察') >= 0 ? '待观察' : '') : '')}">${esc(j.verdict || '')}</div>
             <div class="card-foot">
               <span class="${interviewable(j) ? 'can' : 'view'}">${interviewable(j) ? '可模拟问答' : '仅查看复盘'}</span>
               <span class="${r ? 'score-tag' : ''}">${r ? `上次 ${r.pct}%` : ''}</span>
@@ -140,7 +140,7 @@ const UI = (function () {
       <div class="job-head">
         <div class="job-sub">${esc(job.category)} · ${esc(job.org)}</div>
         <div class="tags">${job.tags.map(t => `<span>${esc(t)}</span>`).join('')}</div>
-        <p><b>复盘结论：</b>${esc(job.verdict || '待整理')}</p>
+        <p><b>复盘结论：</b>${esc(job.verdict || '')}</p>
         <p>${esc(job.conclusion)}</p>
       </div>
       ${job.jd.length
@@ -179,7 +179,7 @@ const UI = (function () {
             <div class="card-sub">${esc(j.org)}</div>
             <div class="card-foot"><span>${n} 道真实问答</span><span>${S.results[j.id] ? `上次 ${S.results[j.id].pct}%` : '未练习'}</span></div>
           </button>`;
-        }).join('') || '<p class="hint">暂无可模拟的岗位。</p>'}
+        }).join('') || '<p class="hint">没有可模拟的岗位。</p>'}
       </div>`);
   }
 
@@ -242,7 +242,7 @@ const UI = (function () {
       open(title, `${head}${q}${real}
         <p class="hint">你作为面试官，给这条回答的证据打分（1–5）。</p>
         <div class="opts rate">
-          ${[1, 2, 3, 4, 5].map(v => `<button class="opt" data-go="rate" data-v="${v}"><b>${v} 分</b> · ${['证据不足', '证据薄弱', '有一定证据待验证', '证据较充分', '证据充分（有数字、可核对）'][v - 1]}</button>`).join('')}
+          ${[1, 2, 3, 4, 5].map(v => `<button class="opt" data-go="rate" data-v="${v}"><b>${v} 分</b> · ${['证据不足', '证据薄弱', '证据部分成立', '证据较充分', '证据充分（有数字、可核对）'][v - 1]}</button>`).join('')}
         </div>`);
     } else {
       const arr = ss.ratings[ss.lastKey] || [];
@@ -404,7 +404,7 @@ const UI = (function () {
       <h3>可追溯说明</h3>
       <div class="src">
         <p>结论基于：${esc(r.source)}</p>
-        <p>评分口径：有复盘原始评分的直接使用（10 分制折半）；只有判断词的，按「证据较充分=4、有一定证据待验证=3、有具体不匹配证据=2」映射（见数据说明）。</p>
+        <p>评分口径：有复盘原始评分的直接使用（10 分制折半）；只有判断词的，按「证据较充分=4、证据部分成立=3、有具体不匹配证据=2」映射（见数据说明）。</p>
         <p>本报告只用于练习，不代表任何企业的录用结果。</p>
       </div>
 
@@ -508,8 +508,8 @@ const UI = (function () {
   }
 
   /* ---------- 成果展馆 ---------- */
-  const PILL = { '已完成': 'ok', '进行中': 'doing', '待办': 'todo', '已定': 'ok', '待定': 'todo' };
-  const pillCls = s => { for (const k of Object.keys(PILL)) if (String(s).indexOf(k) === 0) return PILL[k]; return 'todo'; };
+  const PILL = { '已完成': 'ok', '已定': 'ok' };
+  const pillCls = s => { for (const k of Object.keys(PILL)) if (String(s).indexOf(k) === 0) return PILL[k]; return 'ok'; };
   function openShowcase() {
     if (!REAL) return open('成果展馆', noData());
     const R = REAL.requirements;
@@ -561,7 +561,7 @@ const UI = (function () {
     open('数据说明', `
       <h3>数据从哪来</h3>
       <ul class="plain">
-        <li>${esc(m ? m.source : '真实数据尚未加载')}</li>
+        <li>${esc(m ? m.source : '真实数据未加载')}</li>
         <li>${esc(m ? m.privacy : '')}</li>
         <li>${esc(m ? m.note : '')}</li>
       </ul>
@@ -570,7 +570,7 @@ const UI = (function () {
       <h3>评分规则</h3>
       <ul class="plain">
         <li>有复盘原始评分的（如需求分析 4.0、项目真实性 3.5）直接使用。</li>
-        <li>只有判断词的，映射为分数：「证据较充分」= 4，「有一定证据待验证」= 3，「有具体不匹配证据」= 2。「证据不足暂无法判断」和没有判断的不打分。</li>
+        <li>只有判断词的，映射为分数：「证据较充分」= 4，「证据部分成立」= 3，「有具体不匹配证据」= 2。「证据不足，无法判断」和没有判断的不打分。</li>
         <li>10 分制的原始分（如黄国靖的各模块得分）统一换算为 5 分制（÷ 2），原始分保留在表格里。</li>
         <li>模拟面试里，面试官视角的评分与复盘分相差不超过 1 分，记为判断接近。</li>
         <li>总分 = Σ（能力项分数 × 权重）÷ Σ 权重。≥ 3.8 为「能用」，3.0–3.8 为「待观察」，< 3.0 为「不匹配」。</li>
@@ -606,7 +606,7 @@ const UI = (function () {
   function init() {
     bindHud();
     setRoleBadge();
-    if (!REAL) World.say('小助手', ['真实数据还没有加载。线上版本部署完成后，这里会显示真实的岗位与复盘。']);
+    if (!REAL) World.say('小助手', ['真实数据未加载。线上版本部署完成后，这里会显示真实的岗位与复盘。']);
     else if (!S.role) setTimeout(() => openIdentity(true), 400);
   }
   document.addEventListener('DOMContentLoaded', init);
