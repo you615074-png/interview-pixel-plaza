@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>面试广场 · 像素版｜双向模拟面试</title>
+  <meta name="description" content="像素风双向模拟面试：从面试广场选岗位，看任职要求，在面试官与候选人两个视角之间对话，最终生成带证据对照的解析报告。">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css?v=5">
+</head>
+<body>
+  <div id="app">
+    <header class="hud">
+      <div class="brand">面试广场 <small>· 像素版</small></div>
+      <div class="hud-btns">
+        <button class="btn-hud" id="btn-board">📋 职业公告板</button>
+        <button class="btn-hud" id="btn-showcase">🏛 成果展馆</button>
+        <button class="btn-hud" id="btn-guide">🗺 广场导览</button>
+        <button class="btn-hud" id="btn-role">🔄 切换视角</button>
+        <span id="role-badge">视角：未选择</span>
+        <button class="btn-hud" id="btn-data">📖 数据说明</button>
+        <button class="btn-hud" id="btn-music" aria-pressed="false">♪ 音乐关</button>
+      </div>
+    </header>
+
+    <main class="stage" id="stage">
+      <canvas id="world" width="320" height="192" aria-label="像素广场：用方向键移动，靠近建筑或 NPC 按 E 互动"></canvas>
+      <div id="labels" aria-hidden="true"></div>
+      <div id="prompt" hidden></div>
+      <div id="dialog" hidden>
+        <div id="dlg-name"></div>
+        <p id="dlg-text"></p>
+        <span class="dlg-next">▼ 点击 / E 继续</span>
+      </div>
+    </main>
+
+    <div class="touch" aria-hidden="false">
+      <div class="dpad">
+        <button data-dir="up" aria-label="上">▲</button>
+        <button data-dir="left" aria-label="左">◀</button>
+        <button data-dir="right" aria-label="右">▶</button>
+        <button data-dir="down" aria-label="下">▼</button>
+      </div>
+      <button id="btn-act" aria-label="互动">A</button>
+    </div>
+
+    <p class="foot">
+      玩法：方向键 / WASD 移动，E 或空格互动。先去<b>职业公告板</b>选岗位，再到<b>模拟面试室</b>作答，最后在<b>报告馆</b>查看解析。
+      素材：<a href="https://kenney.nl/assets/tiny-town" target="_blank" rel="noopener">Kenney Tiny Town</a> &amp;
+      <a href="https://kenney.nl/assets/tiny-dungeon" target="_blank" rel="noopener">Tiny Dungeon</a>（CC0）。
+    </p>
+  </div>
+
+  <div id="panel" hidden role="dialog" aria-modal="true" aria-labelledby="panel-title">
+    <div class="panel-box">
+      <div class="panel-head">
+        <h2 id="panel-title"></h2>
+        <button id="panel-close" aria-label="关闭">✕</button>
+      </div>
+      <div id="panel-body"></div>
+    </div>
+  </div>
+
+  <script src="js/data.js?v=5"></script>
+  <script src="js/audio.js?v=5"></script>
+  <script src="js/world.js?v=5"></script>
+  <script src="js/ui.js?v=5"></script>
+</body>
+</html>
