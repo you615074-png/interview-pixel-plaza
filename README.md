@@ -51,6 +51,17 @@
 - 视觉风格参考星露谷物语的田园像素风，本项目未使用星露谷官方素材。
 - 标题字体：Press Start 2P（Google Fonts，SIL Open Font License）。
 
+## 真实数据怎么接入
+
+真实数据不在仓库里。它来自本地的复盘材料，经过去标识化后生成网页用的数据文件。
+
+1. 把去标识化后的数据放在 `private-data/real-data.json`（仓库之外，不提交）。
+2. 运行 `python3 tools/build_real_data.py`，生成 `site/js/real-data.js`（已被 `.gitignore` 忽略）。脚本会检查敏感词，命中则拒绝生成。
+3. 本地打开网页即可看到真实数据。
+4. 线上版本由 GitHub Actions（`.github/workflows/pages.yml`）部署：把生成的 `private-data/real-data.b64` 内容设为仓库 secret `REAL_DATA_B64`，部署时自动注入，仓库里不会出现数据文件。
+
+没有设置 secret 时，网站会正常打开，但不显示真实岗位。
+
 ## 本地运行
 
 ```bash

@@ -1,24 +1,38 @@
-/* 界面层：身份选择、职业列表、岗位详情（匹配机制）、模拟面试（双视角）、解析报告、数据说明。 */
+/* 界面层：身份选择、职业公告板、岗位详情、模拟面试（双视角）、解析报告、成果展馆、导览、数据说明。
+ * 所有岗位与问答都来自 js/real-data.js（真实复盘，已去标识化）。 */
 const UI = (function () {
   const $ = sel => document.querySelector(sel);
   const panel = $('#panel');
   const panelBody = $('#panel-body');
   const panelTitle = $('#panel-title');
   const roleBadge = $('#role-badge');
-  const PASS = 3.8, WATCH = 3.0;
+  const PASS = 3.8, WATCH = 3.0, CLOSE = 1.0;
 
   const store = {
     get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 隐私模式下忽略 */ } }
   };
-  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const jobById = id => JOBS.find(j => j.id === id);
+  const interviewable = job => job.items.some(it => it.qa && it.qa.length);
+  const round2 = x => Math.round(x * 100) / 100;
+  const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const verdictOf = s => (s == null ? null : s >= PASS ? '能用' : s >= WATCH ? '待观察' : '不匹配');
+  const verdictCls = v => (v === '能用' ? 'ok' : v === '待观察' ? 'warn' : v === '不匹配' ? 'bad' : '');
+
+  // 权重归一化：复盘给了权重就用权重，没给就均分
+  function wnorm(job) {
+    const raw = job.items.map(it => (typeof it.weight === 'number' ? it.weight : 1));
+    const sum = raw.reduce((a, b) => a + b, 0) || 1;
+    return raw.map(x => x / sum);
+  }
+  const pctW = (job, i) => Math.round(wnorm(job)[i] * 100);
 
   const S = {
-    role: store.get('iq.role'),          // 'candidate' | 'interviewer'
-    results: store.get('iq.results') || {}, // jobId -> 报告摘要
-    last: store.get('iq.last'),          // 最近一份完整报告
-    session: null                        // 进行中的模拟面试
+    role: store.get('iq.role'),              // 'candidate' | 'interviewer'
+    results: store.get('iq.results') || {},  // jobId -> 报告摘要
+    last: store.get('iq.last'),              // 最近一份报告
+    session: null                            // 进行中的模拟面试
   };
 
   /* ---------- 面板基础 ---------- */
@@ -31,6 +45,7 @@ const UI = (function () {
   }
   function close() { panel.hidden = true; panelBody.innerHTML = ''; }
   const blocking = () => !panel.hidden || World.talking();
+  const noData = () => `<p class="lead">真实数据还没有加载。请在本地运行 <code>python3 tools/build_real_data.py</code>，或等待线上版本部署完成。</p>`;
 
   function route(go, d) {
     if (go === 'careers') openCareers(d.cat);
@@ -43,16 +58,14 @@ const UI = (function () {
     else if (go === 'guide') openGuide();
     else if (go === 'role') pickRole(d.role);
     else if (go === 'close') close();
-    else if (go === 'answer') answer(Number(d.i));
-    else if (go === 'rate') rate(Number(d.level));
+    else if (go === 'reveal') reveal();
+    else if (go === 'rate') rate(Number(d.v));
     else if (go === 'next') nextQuestion();
-    else if (go === 'finish') finishInterview();
     else if (go === 'copy') copyReport();
-    else if (go === 'reset') { S.session = null; openHall(); }
   }
 
   /* ---------- 身份 ---------- */
-  function roleName(r) { return r === 'interviewer' ? '面试官' : '候选人'; }
+  const roleName = r => (r === 'interviewer' ? '面试官' : '候选人');
   function setRoleBadge() { roleBadge.textContent = S.role ? `视角：${roleName(S.role)}` : '视角：未选择'; }
   function pickRole(role) {
     if (S.session && S.session.role !== role) S.session = null;
@@ -60,22 +73,22 @@ const UI = (function () {
     store.set('iq.role', role);
     setRoleBadge();
     const hint = role === 'interviewer'
-      ? '好的，你现在是面试官。去模拟面试室，判断候选人的回答里有没有足够的证据。'
-      : '好的，你现在是候选人。去职业公告板看清任职要求，再到模拟面试室作答。';
+      ? '好的，你现在是面试官。去模拟面试室，判断候选人的回答里有没有足够的证据，再和复盘的判断对照。'
+      : '好的，你现在是候选人。去模拟面试室，回放真实的问答，看看复盘指出了哪些缺口和更优答法。';
     if (!panel.hidden) close();
     World.say('小助手', [hint]);
   }
   function openIdentity(first) {
     open('选择你的身份', `
-      <p class="lead">${first ? '欢迎来到面试广场。' : ''}本站的问答有两种视角，最后都会汇到同一张证据表上：</p>
+      <p class="lead">${first ? '欢迎来到面试广场。' : ''}两种视角都基于同一批真实复盘，最后汇到同一张证据表上：</p>
       <div class="grid2">
         <button class="choice" data-go="role" data-role="candidate">
           <b>候选人</b>
-          <span>面试官会问你问题。你要用经历、数据和判断，证明自己符合岗位要求。</span>
+          <span>回放真实的问答：看自己当时的回答、复盘的点评，以及更优的答法。</span>
         </button>
         <button class="choice" data-go="role" data-role="interviewer">
           <b>面试官</b>
-          <span>候选人会回答。你要判断每个回答里的证据够不够，并给出能用 / 待观察 / 不匹配的结论。</span>
+          <span>看候选人的真实回答，自己给证据打分，再和复盘的判断对照。</span>
         </button>
       </div>`);
   }
@@ -84,199 +97,193 @@ const UI = (function () {
     pickRole(S.role === 'candidate' ? 'interviewer' : 'candidate');
   }
 
-  /* ---------- 职业列表 ---------- */
+  /* ---------- 职业公告板 ---------- */
   function openCareers(cat) {
+    if (!REAL) return open('职业公告板', noData());
     const cats = ['全部', ...new Set(JOBS.map(j => j.category))];
-    const current = cat && cats.includes(cat) ? cat : '全部';
+    const current = cats.includes(cat) ? cat : '全部';
     const list = JOBS.filter(j => current === '全部' || j.category === current);
     open('职业公告板', `
-      <p class="lead">岗位任职要求会被拆成「证据项」。面试回答命中哪一项，匹配度才会上升。</p>
+      <p class="lead">每个岗位来自真实的复盘材料（已去标识化）。有问答记录的岗位可以模拟面试；其余岗位只能查看复盘里的证据与结论。</p>
       <div class="chips">${cats.map(c => `<button class="chip ${c === current ? 'on' : ''}" data-go="careers" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>
       <div class="cards">
         ${list.map(j => {
           const r = S.results[j.id];
-          return `<button class="card" data-go="job" data-id="${j.id}">
+          return `<button class="card" data-go="job" data-id="${esc(j.id)}">
             <div class="card-title">${esc(j.title)}</div>
-            <div class="card-sub">${esc(j.sub)}</div>
+            <div class="card-sub">${esc(j.org)}</div>
             <div class="tags">${j.tags.map(t => `<span>${esc(t)}</span>`).join('')}</div>
+            <div class="verdict-line ${verdictCls(j.verdict ? (j.verdict.indexOf('通过') >= 0 || j.verdict.indexOf('进入下一轮') >= 0 ? '能用' : j.verdict.indexOf('补充考察') >= 0 ? '待观察' : '') : '')}">${esc(j.verdict || '复盘结论待整理')}</div>
             <div class="card-foot">
-              <span>${esc(j.source.type)}</span>
-              <span class="${r ? 'score-tag' : ''}">${r ? `上次匹配 ${r.pct}%` : '尚未练习'}</span>
+              <span class="${interviewable(j) ? 'can' : 'view'}">${interviewable(j) ? '可模拟问答' : '仅查看复盘'}</span>
+              <span class="${r ? 'score-tag' : ''}">${r ? `上次 ${r.pct}%` : ''}</span>
             </div>
           </button>`;
         }).join('')}
       </div>`);
   }
 
-  /* ---------- 岗位详情：技能要求与匹配机制 ---------- */
-  function jobMatch(job) {
-    const r = S.results[job.id];
-    return r ? r.pct : null;
-  }
+  /* ---------- 岗位详情 ---------- */
   function openJob(id) {
     const job = jobById(id);
     if (!job) return;
-    const r = S.results[id];
-    const reqRows = job.dims.map(d => {
-      const got = r ? r.rows.find(x => x.id === d.id) : null;
-      const status = got
-        ? `<span class="hit lv${got.level}">${LEVEL_LABEL[got.level]}</span>`
-        : '<span class="hit lv0">尚未收集证据</span>';
-      return `<li>
-        <div class="req-head"><b>${esc(d.name)}</b><em>权重 ${d.weight}%</em></div>
-        <div class="req-jd">要求：${esc(d.jd)}</div>
-        <div class="req-state">${status}</div>
-      </li>`;
-    }).join('');
+    const w = wnorm(job);
+    const rows = job.items.map((it, i) => `<tr>
+        <td><b>${esc(it.name)}</b><div class="muted">${esc(it.jd)}</div></td>
+        <td>${Math.round(w[i] * 100)}%</td>
+        <td>${esc(it.judgment || '复盘未给出单独判断')}</td>
+        <td>${it.score == null ? '—' : `<span class="lv lv${Math.round(it.score)}">${it.score.toFixed(1)}</span>`}</td>
+        <td>${esc(it.verify || '—')}</td>
+      </tr>`).join('');
     open(job.title, `
       <div class="job-head">
-        <div class="job-sub">${esc(job.sub)} · ${esc(job.company)}</div>
-        <p>${esc(job.summary)}</p>
+        <div class="job-sub">${esc(job.category)} · ${esc(job.org)}</div>
         <div class="tags">${job.tags.map(t => `<span>${esc(t)}</span>`).join('')}</div>
-        <div class="src">数据来源：${esc(job.source.type)}。${esc(job.source.detail)}</div>
+        <p><b>复盘结论：</b>${esc(job.verdict || '待整理')}</p>
+        <p>${esc(job.conclusion)}</p>
       </div>
-      <h3>任职要求 → 证据项（匹配机制）</h3>
-      <p class="hint">每条要求对应一个证据项，权重加总为 100%。面试中，每题只会针对一个证据项提问；命中越充分，分数越高。</p>
-      <div class="match-bar"><div style="width:${jobMatch(job) ?? 0}%"></div><span>当前匹配度 ${jobMatch(job) ?? 0}%</span></div>
-      <ol class="reqs">${reqRows}</ol>
+      ${job.jd.length
+        ? `<h3>岗位要求（来自 JD）</h3><ul class="plain">${job.jd.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`
+        : '<p class="hint">复盘材料里没有该岗位的 JD 要点，这里只展示复盘结论。</p>'}
+      ${job.items.length ? `
+        <h3>证据项与复盘判断</h3>
+        <p class="hint">权重来自复盘；没有给权重的岗位按均分计算。「复盘分」只在复盘给出评分或判断词时才会有数值。</p>
+        <div class="table-wrap"><table class="evid">
+          <thead><tr><th>能力项</th><th>权重</th><th>复盘判断</th><th>复盘分</th><th>仍需验证</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>` : ''}
       <div class="actions">
-        <button class="btn primary" data-go="start" data-id="${job.id}">开始模拟面试（${esc(roleName(S.role || 'candidate'))}视角）</button>
+        ${interviewable(job)
+          ? `<button class="btn primary" data-go="start" data-id="${esc(job.id)}">开始模拟面试（${esc(roleName(S.role || 'candidate'))}视角）</button>`
+          : '<span class="hint">这个岗位的复盘没有整理成问答记录，只能查看证据与结论。</span>'}
         <button class="btn" data-go="careers">返回公告板</button>
       </div>`);
   }
 
-  /* ---------- 模拟面试室：选岗 ---------- */
+  /* ---------- 模拟面试室 ---------- */
   function openHall() {
-    if (S.session && !S.session.finished) return resumeSession();
+    if (S.session) return resumeSession();
+    if (!REAL) return open('模拟面试室', noData());
     if (!S.role) return openIdentity(false);
+    const list = JOBS.filter(interviewable);
     open('模拟面试室', `
-      <p class="lead">当前视角：<b>${roleName(S.role)}</b>。选一个岗位开始。<button class="link" data-go="role" data-role="${S.role === 'candidate' ? 'interviewer' : 'candidate'}">切换为${roleName(S.role === 'candidate' ? 'interviewer' : 'candidate')}</button></p>
+      <p class="lead">当前视角：<b>${roleName(S.role)}</b>。
+        <button class="link" data-go="role" data-role="${S.role === 'candidate' ? 'interviewer' : 'candidate'}">切换为${roleName(S.role === 'candidate' ? 'interviewer' : 'candidate')}</button></p>
+      <p class="hint">只列出有真实问答记录的岗位。候选人视角回放当时的回答与更优答法；面试官视角自己打分，再对照复盘。</p>
       <div class="cards">
-        ${JOBS.map(j => `<button class="card" data-go="start" data-id="${j.id}">
-          <div class="card-title">${esc(j.title)}</div>
-          <div class="card-sub">${esc(j.sub)}</div>
-          <div class="card-foot"><span>6 道题 · ${j.dims.length} 个证据项</span><span>${S.results[j.id] ? `上次 ${S.results[j.id].pct}%` : '未练习'}</span></div>
-        </button>`).join('')}
+        ${list.map(j => {
+          const n = j.items.reduce((a, it) => a + (it.qa ? it.qa.length : 0), 0);
+          return `<button class="card" data-go="start" data-id="${esc(j.id)}">
+            <div class="card-title">${esc(j.title)}</div>
+            <div class="card-sub">${esc(j.org)}</div>
+            <div class="card-foot"><span>${n} 道真实问答</span><span>${S.results[j.id] ? `上次 ${S.results[j.id].pct}%` : '未练习'}</span></div>
+          </button>`;
+        }).join('') || '<p class="hint">暂无可模拟的岗位。</p>'}
       </div>`);
   }
 
   /* ---------- 模拟面试 ---------- */
+  function queueOf(job) {
+    const q = [];
+    job.items.forEach(it => (it.qa || []).forEach(qa => q.push({ item: it, qa })));
+    return q;
+  }
   function startInterview(id) {
     if (!S.role) return openIdentity(false);
     const job = jobById(id);
-    S.session = { jobId: job.id, role: S.role, idx: 0, answers: {}, replies: {}, matches: 0, phase: 'ask', finished: false };
+    if (!job || !interviewable(job)) return;
+    S.session = { jobId: job.id, role: S.role, queue: queueOf(job), i: 0, phase: 'ask', ratings: {} };
     renderQuestion();
   }
   function resumeSession() {
     if (S.session.role !== S.role) { S.session = null; return openHall(); }
     renderQuestion();
   }
-  function currentDim() {
-    const job = jobById(S.session.jobId);
-    return { job, dim: job.dims[S.session.idx] };
-  }
-  function interviewerBubble(text) {
-    return `<div class="bubble"><div class="who">周老师（面试官）</div><p>${esc(text)}</p></div>`;
-  }
-  function candidateBubble(text) {
-    return `<div class="bubble cand"><div class="who">候选人 · 小 L（模拟）</div><p>${esc(text)}</p></div>`;
-  }
-  function progressHtml(job) {
-    const n = S.session.idx, total = job.dims.length;
-    const dots = job.dims.map((_, i) => `<i class="${i < n ? 'done' : i === n ? 'now' : ''}"></i>`).join('');
-    return `<div class="progress"><span>第 ${Math.min(n + 1, total)} / ${total} 题</span><div class="dots">${dots}</div></div>`;
-  }
+  const bubble = (who, text, cls) => `<div class="bubble ${cls || ''}"><div class="who">${esc(who)}</div><p>${esc(text)}</p></div>`;
 
   function renderQuestion() {
     const ss = S.session;
-    const { job, dim } = currentDim();
-    const head = `<div class="q-head">${progressHtml(job)}
-      <div class="ev">证据项：<b>${esc(dim.name)}</b>（权重 ${dim.weight}%）· 对应要求：${esc(dim.jd)}</div></div>`;
+    const job = jobById(ss.jobId);
+    const cur = ss.queue[ss.i];
+    const it = cur.item, qa = cur.qa;
+    const idx = job.items.indexOf(it);
+    const head = `<div class="q-head">
+      <div class="progress"><span>第 ${ss.i + 1} / ${ss.queue.length} 题</span><span class="muted">${esc(job.title)}</span></div>
+      <div class="ev">证据项：<b>${esc(it.name)}</b>（权重 ${pctW(job, idx)}%）· 岗位要求：${esc(it.jd)}</div></div>`;
     const title = ss.role === 'candidate' ? '模拟面试 · 候选人视角' : '模拟面试 · 面试官视角';
+    const q = bubble('周老师（面试官）', qa.q);
+    const real = bubble('候选人（复盘记录的原始回答）', qa.answer, 'cand');
+    const next = `<div class="actions"><button class="btn primary" data-go="next">${ss.i + 1 < ss.queue.length ? '下一题' : '生成解析报告'}</button></div>`;
 
     if (ss.role === 'candidate') {
       if (ss.phase === 'ask') {
-        open(title, `${head}
-          ${interviewerBubble(dim.q)}
-          <p class="hint">选一个你会说的回答。每个回答背后的证据强弱不同。</p>
-          <div class="opts">${dim.opts.map((o, i) => `<button class="opt" data-go="answer" data-i="${i}">${esc(o.text)}</button>`).join('')}</div>`);
+        open(title, `${head}${q}${real}
+          <p class="hint">这是复盘里记录的真实问答。先读一遍当时的回答，再看复盘的点评。</p>
+          <div class="actions"><button class="btn primary" data-go="reveal">看复盘点评与更优答法</button></div>`);
       } else {
-        const chosen = dim.opts.find(o => o.level === ss.answers[dim.id]);
-        const best = dim.opts[0];
-        open(title, `${head}
-          ${interviewerBubble(dim.q)}
-          ${candidateBubble(chosen.text)}
-          ${feedbackBlock(chosen.fb, chosen.level, best)}
-          <div class="actions"><button class="btn primary" data-go="next">${ss.idx + 1 < job.dims.length ? '下一题' : '生成解析报告'}</button></div>`);
-      }
-    } else {
-      const simLevel = job.simLevels[ss.idx];
-      const simOpt = dim.opts.find(o => o.level === simLevel);
-      if (ss.phase === 'ask') {
-        open(title, `${head}
-          ${interviewerBubble(dim.q)}
-          ${candidateBubble(simOpt.text)}
-          <p class="hint">候选人已经回答。你判断这条回答里的证据够不够？</p>
-          <div class="opts">
-            <button class="opt" data-go="rate" data-level="5">✅ 证据充分（给 5 分）· 有具体动作、数字或可核查的方法</button>
-            <button class="opt" data-go="rate" data-level="3">🟡 有证据但待验证（给 3 分）· 方向对，但缺口径或细节</button>
-            <button class="opt" data-go="rate" data-level="1">❌ 证据不足（给 1 分）· 空泛、没有依据或说不清</button>
-          </div>`);
-      } else {
-        const mine = ss.answers[dim.id];
-        const right = mine === simLevel;
-        open(title, `${head}
-          ${interviewerBubble(dim.q)}
-          ${candidateBubble(simOpt.text)}
+        open(title, `${head}${q}${real}
           <div class="feedback">
-            <div class="who">你的判断：${esc(LEVEL_LABEL[mine])}</div>
-            <p>${right ? '✅ 与候选人的实际证据等级一致。' : `⚠️ 偏差：候选人的实际证据等级是「${esc(LEVEL_LABEL[simLevel])}」。`}</p>
-            <p class="fb-note">${esc(simOpt.fb)}</p>
-            ${simLevel !== 5 ? `<p class="better"><b>更优的证据：</b>${esc(dim.opts[0].text)}</p>` : ''}
-          </div>
-          <div class="actions"><button class="btn primary" data-go="next">${ss.idx + 1 < job.dims.length ? '下一题' : '生成解析报告'}</button></div>`);
+            <div class="who">复盘点评</div>
+            <p><b>这一问想验证什么：</b>${esc(qa.verifies || '—')}</p>
+            <p><b>现场问题：</b>${esc(qa.problem || '—')}</p>
+            ${qa.better ? `<p class="better"><b>更优答法：</b>${esc(qa.better)}</p>` : ''}
+            <p class="muted">仍需验证：${esc(it.verify || '—')}</p>
+          </div>${next}`);
       }
+      return;
+    }
+
+    // 面试官视角：先打分，再对照复盘
+    if (ss.phase === 'ask') {
+      open(title, `${head}${q}${real}
+        <p class="hint">你作为面试官，给这条回答的证据打分（1–5）。</p>
+        <div class="opts rate">
+          ${[1, 2, 3, 4, 5].map(v => `<button class="opt" data-go="rate" data-v="${v}"><b>${v} 分</b> · ${['证据不足', '证据薄弱', '有一定证据待验证', '证据较充分', '证据充分（有数字、可核对）'][v - 1]}</button>`).join('')}
+        </div>`);
+    } else {
+      const arr = ss.ratings[ss.lastKey] || [];
+      const mine = arr.length ? arr[arr.length - 1] : 0;
+      const rv = it.score;
+      const gap = rv == null ? null : Math.abs(mine - rv);
+      const verdictLine = rv == null
+        ? '复盘没有给这一项打分，只有文字判断。'
+        : gap <= CLOSE ? `✅ 与复盘分相差 ${gap.toFixed(1)} 分，判断接近。`
+        : `⚠️ 与复盘分相差 ${gap.toFixed(1)} 分（复盘 ${rv.toFixed(1)} 分）。`;
+      open(title, `${head}${q}${real}
+        <div class="feedback">
+          <div class="who">你的评分：${mine} 分 ｜ 复盘判断：${esc(it.judgment || '—')}</div>
+          <p>${verdictLine}</p>
+          <p><b>这一问想验证什么：</b>${esc(qa.verifies || '—')}</p>
+          <p><b>现场问题：</b>${esc(qa.problem || '—')}</p>
+          ${qa.better ? `<p class="better"><b>更优的证据：</b>${esc(qa.better)}</p>` : ''}
+        </div>${next}`);
     }
   }
 
-  function feedbackBlock(fb, level, best) {
-    return `<div class="feedback">
-      <div class="who">周老师的点评</div>
-      <p class="fb-note">${esc(fb)}</p>
-      ${level !== 5 ? `<p class="better"><b>更优答法：</b>${esc(best.text)}</p>` : '<p class="better">✅ 这一答已经是更优答法。</p>'}
-    </div>`;
-  }
-
-  function answer(i) {
-    const ss = S.session;
-    const { dim } = currentDim();
-    const o = dim.opts[i];
-    ss.answers[dim.id] = o.level;
-    ss.replies[dim.id] = o.text;
-    ss.phase = 'reveal';
+  function reveal() {
+    S.session.phase = 'reveal';
     renderQuestion();
   }
-  function rate(level) {
+  function rate(v) {
     const ss = S.session;
-    const { job, dim } = currentDim();
-    const simLevel = job.simLevels[ss.idx];
-    ss.answers[dim.id] = level;
-    ss.replies[dim.id] = dim.opts.find(o => o.level === simLevel).text;
-    if (level === simLevel) ss.matches++;
+    const cur = ss.queue[ss.i];
+    const id = cur.item.id;
+    (ss.ratings[id] = ss.ratings[id] || []).push(v);
+    ss.lastKey = id;
     ss.phase = 'reveal';
     renderQuestion();
   }
   function nextQuestion() {
     const ss = S.session;
-    const { job } = currentDim();
     ss.phase = 'ask';
-    if (ss.idx + 1 < job.dims.length) { ss.idx++; renderQuestion(); }
-    else { ss.finished = true; finishInterview(); }
+    if (ss.i + 1 < ss.queue.length) { ss.i++; renderQuestion(); return; }
+    finishInterview();
   }
+
   function finishInterview() {
     const ss = S.session;
     const report = buildReport(ss);
-    S.results[report.jobId] = { pct: report.pct, verdict: report.verdict, at: Date.now(), rows: report.rows };
+    S.results[report.jobId] = { pct: report.pct, verdict: report.verdict, at: Date.now() };
     S.last = report;
     store.set('iq.results', S.results);
     store.set('iq.last', report);
@@ -287,39 +294,53 @@ const UI = (function () {
   /* ---------- 解析报告 ---------- */
   function buildReport(ss) {
     const job = jobById(ss.jobId);
-    let total = 0, wsum = 0;
-    const rows = job.dims.map(d => {
-      const level = ss.answers[d.id];
-      total += d.weight * level;
-      wsum += d.weight;
-      return { id: d.id, name: d.name, weight: d.weight, jd: d.jd, level, label: LEVEL_LABEL[level], reply: ss.replies[d.id], tip: d.tip };
+    const w = wnorm(job);
+    let rs = 0, rw = 0, us = 0, uw = 0, hit = 0, cmp = 0;
+    const rows = job.items.map((it, i) => {
+      const rated = ss.ratings[it.id];
+      const userAvg = rated && rated.length ? avg(rated) : null;
+      if (it.score != null) {
+        rs += w[i] * it.score; rw += w[i];
+        if (userAvg != null) { cmp++; if (Math.abs(userAvg - it.score) <= CLOSE) hit++; }
+      }
+      const useScore = userAvg != null ? userAvg : it.score;
+      if (useScore != null) { us += w[i] * useScore; uw += w[i]; }
+      return {
+        id: it.id, name: it.name, w: Math.round(w[i] * 100), jd: it.jd,
+        judgment: it.judgment || '复盘未给出单独判断', verify: it.verify || '',
+        reviewer: it.score, basis: it.score_basis || null, user: userAvg,
+        answer: it.qa && it.qa[0] ? it.qa[0].answer : null
+      };
     });
-    const score = Math.round((total / wsum) * 100) / 100;
-    const pct = Math.round((score / 5) * 100);
-    const verdict = score >= PASS ? '能用' : score >= WATCH ? '待观察' : '不匹配';
-    const sorted = [...rows].sort((a, b) => a.level - b.level || b.weight - a.weight);
-    const weakest = sorted[0];
-    const strongest = [...rows].sort((a, b) => b.level - a.level || b.weight - a.weight)[0];
+    const reviewer = rw ? round2(rs / rw) : null;
+    const userScore = uw ? round2(us / uw) : null;
+    const main = ss.role === 'interviewer' ? (userScore != null ? userScore : reviewer) : reviewer;
     return {
-      jobId: job.id, title: job.title, mode: ss.role, score, pct, verdict,
-      weakest: weakest.name, strongest: strongest.name,
-      accuracy: ss.role === 'interviewer' ? { hit: ss.matches, total: job.dims.length } : null,
-      rows, source: job.source, at: Date.now()
+      jobId: job.id, title: job.title, org: job.org, mode: ss.role,
+      reviewer, userScore, verdict: verdictOf(main), reviewerLabel: verdictOf(reviewer), reviewerVerdict: job.verdict || '',
+      pct: main == null ? null : Math.round((main / 5) * 100),
+      rows, accuracy: ss.role === 'interviewer' ? { hit, total: cmp } : null,
+      source: job.source || REAL.meta.source, at: Date.now()
     };
   }
-  function gapsOf(r) { return r.rows.filter(x => x.level <= 3); }
+  function weakest(r) {
+    const scored = r.rows.filter(x => (x.user != null ? x.user : x.reviewer) != null);
+    if (!scored.length) return null;
+    return scored.slice().sort((a, b) => (a.user != null ? a.user : a.reviewer) - (b.user != null ? b.user : b.reviewer))[0];
+  }
   function interviewerConclusion(r) {
-    const why = {
-      '能用': `总分 ${r.score} 分，达到能用线（≥${PASS}）。证据最扎实的是「${r.strongest}」。`,
-      '待观察': `总分 ${r.score} 分，处于待观察区间（${WATCH}–${PASS}）。最弱的证据项是「${r.weakest}」，需要二面确认。`,
-      '不匹配': `总分 ${r.score} 分，低于 ${WATCH}。多个证据项缺失，目前不建议进入下一轮。`
-    };
-    return why[r.verdict];
+    const s = r.mode === 'interviewer' && r.userScore != null ? r.userScore : r.reviewer;
+    if (s == null) return '复盘没有给出数值分，只能看文字判断。';
+    const wk = weakest(r);
+    const tail = wk ? `最弱的证据项是「${wk.name}」。` : '';
+    if (r.verdict === '能用') return `得分 ${s.toFixed(2)}，达到能用线（≥${PASS}）。${tail}`;
+    if (r.verdict === '待观察') return `得分 ${s.toFixed(2)}，处于待观察区间（${WATCH}–${PASS}），建议补充证据后再判断。${tail}`;
+    return `得分 ${s.toFixed(2)}，低于 ${WATCH}，目前证据不足以支持进入下一轮。${tail}`;
   }
   function candidateConclusion(r) {
-    const gaps = gapsOf(r);
-    if (!gaps.length) return '证据基本齐全。下一轮可以挑战更高难度的追问，重点放在细节的可核查性上。';
-    return `还缺 ${gaps.length} 项证据，建议下一轮优先补齐：<ul>${gaps.map(g => `<li><b>${esc(g.name)}</b>：${esc(g.tip)}</li>`).join('')}</ul>`;
+    const gaps = r.rows.filter(x => x.reviewer == null || x.reviewer < 4);
+    if (!gaps.length) return '复盘给出的证据基本齐全。下一轮可以挑战更高难度的追问，重点放在细节的可核查性上。';
+    return `还需要补的证据：<ul>${gaps.map(g => `<li><b>${esc(g.name)}</b>：${esc(g.verify || g.judgment)}</li>`).join('')}</ul>`;
   }
 
   function openReport() {
@@ -328,37 +349,46 @@ const UI = (function () {
       return open('报告馆', `<p class="lead">这里还没有报告。先去模拟面试室完成一次问答，再回来看看。</p>
         <div class="actions"><button class="btn primary" data-go="hall">去模拟面试室</button></div>`);
     }
-    const verdictCls = r.verdict === '能用' ? 'ok' : r.verdict === '待观察' ? 'warn' : 'bad';
+    const title = r.title;
+    const verdictHtml = r.mode === 'interviewer'
+      ? `<span class="verdict ${verdictCls(r.verdict)}">你的结论：${esc(r.verdict || '—')}</span> <span class="verdict ${verdictCls(r.reviewerLabel)}">复盘结论：${esc(r.reviewerLabel || '—')}</span>`
+      : `<span class="verdict ${verdictCls(r.reviewerLabel)}">结论：${esc(r.reviewerLabel || '—')}</span>`;
     open('解析报告', `
       <div class="report-top">
-        <div class="score-big">${r.score.toFixed(2)}<small> / 5</small></div>
+        <div class="score-big">${r.reviewer == null ? '—' : r.reviewer.toFixed(2)}<small> / 5</small></div>
         <div>
-          <div class="report-title">${esc(r.title)}</div>
-          <div class="muted">视角：${roleName(r.mode)} · 匹配度 ${r.pct}%</div>
-          <span class="verdict ${verdictCls}">面试官结论：${r.verdict}</span>
+          <div class="report-title">${esc(title)}</div>
+          <div class="muted">复盘得分 · ${esc(r.org)}</div>
+          ${r.mode === 'interviewer' && r.userScore != null ? `<div class="muted">你的评分：<b>${r.userScore.toFixed(2)}</b> / 5</div>` : ''}
+          ${verdictHtml}
+          ${r.reviewerVerdict ? `<div class="muted">复盘原结论：${esc(r.reviewerVerdict)}</div>` : ''}
         </div>
       </div>
-      ${r.accuracy ? `<p class="hint">判断准确率：${r.accuracy.hit} / ${r.accuracy.total}（与模拟候选人的实际证据等级一致的题数）</p>` : ''}
+      ${r.accuracy && r.accuracy.total ? `<p class="hint">判断与复盘分一致（相差不超过 ${CLOSE} 分）：${r.accuracy.hit} / ${r.accuracy.total} 项</p>` : ''}
 
-      <h3>分项得分</h3>
-      <div class="dims">${r.rows.map(x => `
-        <div class="dim">
-          <div class="dim-head"><b>${esc(x.name)}</b><em>权重 ${x.weight}%</em><span class="lv lv${x.level}">${esc(x.label)} · ${x.level} 分</span></div>
-          <div class="bar"><div style="width:${x.level * 20}%"></div></div>
-        </div>`).join('')}
-      </div>
+      <h3>分项对照</h3>
+      <div class="table-wrap"><table class="evid">
+        <thead><tr><th>能力项</th><th>权重</th><th>复盘判断</th><th>复盘分</th>${r.mode === 'interviewer' ? '<th>你的评分</th>' : ''}</tr></thead>
+        <tbody>${r.rows.map(x => `<tr>
+          <td><b>${esc(x.name)}</b></td>
+          <td>${x.w}%</td>
+          <td>${esc(x.judgment)}${x.basis ? `<div class="muted">${esc(x.basis)}</div>` : ''}</td>
+          <td>${x.reviewer == null ? '—' : `<span class="lv lv${Math.round(x.reviewer)}">${x.reviewer.toFixed(1)}</span>`}</td>
+          ${r.mode === 'interviewer' ? `<td>${x.user == null ? '—' : x.user.toFixed(1)}</td>` : ''}
+        </tr>`).join('')}</tbody>
+      </table></div>
 
       <h3>证据对照表</h3>
-      <p class="hint">岗位要求 ↔ 候选人给出的证据 ↔ 命中程度。两种视角都使用这张表。</p>
-      <table class="evid">
-        <thead><tr><th>岗位要求</th><th>候选人证据（模拟回答）</th><th>命中</th></tr></thead>
-        <tbody>${r.rows.map(x => `<tr><td>${esc(x.jd)}</td><td>${esc(x.reply || '—')}</td><td><span class="lv lv${x.level}">${x.level} 分</span></td></tr>`).join('')}</tbody>
-      </table>
+      <p class="hint">岗位要求 ↔ 候选人给出的证据 ↔ 复盘的命中判断。两种视角都使用这张表。</p>
+      <div class="table-wrap"><table class="evid">
+        <thead><tr><th>岗位要求</th><th>候选人证据（复盘记录）</th><th>命中</th></tr></thead>
+        <tbody>${r.rows.map(x => `<tr><td>${esc(x.jd)}</td><td>${esc(x.answer || '（复盘未记录该项的原始回答）')}</td><td>${esc(x.judgment)}</td></tr>`).join('')}</tbody>
+      </table></div>
 
       <div class="two-col">
         <div class="panel-box">
           <h4>面试官视角</h4>
-          <p><b>${r.verdict}</b></p>
+          <p><b>${esc(r.verdict || '—')}</b></p>
           <p>${esc(interviewerConclusion(r))}</p>
         </div>
         <div class="panel-box">
@@ -369,8 +399,9 @@ const UI = (function () {
 
       <h3>可追溯说明</h3>
       <div class="src">
-        <p>结论基于：${esc(r.source.type)}。${esc(r.source.detail)}</p>
-        <p>数据标注：复盘样本取自练习材料，模拟补充部分（JD 摘要与模拟候选人回答）已在来源中注明。本报告仅用于练习，不代表任何真实录用结果。</p>
+        <p>结论基于：${esc(r.source)}</p>
+        <p>评分口径：有复盘原始评分的直接使用；只有判断词的，按「证据较充分=4、有一定证据待验证=3」映射（见数据说明）。</p>
+        <p>本报告只用于练习，不代表任何企业的录用结果。</p>
       </div>
 
       <div class="actions">
@@ -383,17 +414,16 @@ const UI = (function () {
 
   function reportText(r) {
     const lines = [
-      `【面试成绩单】${r.title}`,
-      `视角：${roleName(r.mode)}　总分：${r.score.toFixed(2)} / 5　匹配度：${r.pct}%　结论：${r.verdict}`,
+      `【面试成绩单】${r.title}（${r.org}）`,
+      `视角：${roleName(r.mode)}　复盘得分：${r.reviewer == null ? '—' : r.reviewer.toFixed(2)} / 5　结论：${r.verdict || '—'}`,
+      r.userScore != null && r.mode === 'interviewer' ? `你的评分：${r.userScore.toFixed(2)} / 5` : '',
       '',
-      '分项得分：',
-      ...r.rows.map(x => `- ${x.name}（权重${x.weight}%）：${x.level} 分 · ${x.label}`),
+      '分项：',
+      ...r.rows.map(x => `- ${x.name}（权重${x.w}%）：复盘 ${x.reviewer == null ? '—' : x.reviewer.toFixed(1)} · ${x.judgment}`),
       '',
       `面试官结论：${interviewerConclusion(r)}`,
-      `候选人建议：${gapsOf(r).map(g => `${g.name}：${g.tip}`).join('；') || '证据基本齐全'}`,
-      '',
-      `数据来源：${r.source.type}（练习材料，模拟补充已标注）`
-    ];
+      `数据来源：${r.source}`
+    ].filter(x => x !== '');
     return lines.join('\n');
   }
   function copyReport() {
@@ -401,42 +431,53 @@ const UI = (function () {
     const text = reportText(S.last);
     const done = () => { if (tip) tip.textContent = '已复制到剪贴板。'; };
     const fail = () => { if (tip) tip.textContent = '复制失败，请手动选择文字。'; };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done, fail);
-    } else {
-      fail();
-    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fail);
+    else fail();
   }
 
-  /* ---------- 数据说明 ---------- */
-  function openData() {
-    open('数据说明', `
-      <h3>数据怎么来（三步流水线）</h3>
-      <ol class="steps">
-        <li><b>采集：</b>收集岗位招募信息与个人复盘报告。本站使用的是复盘材料整理文档中的样本。</li>
-        <li><b>AI 处理：</b>从 JD 中抽出任职要求，拆成证据项与评分权重；从复盘中提取问答、证据表现与判断信号。</li>
-        <li><b>补量：</b>真实样本不够的部分由模拟补充，并在每个岗位的「数据来源」中标注。</li>
-      </ol>
-      <h3>真实与模拟的区别</h3>
-      <ul class="plain">
-        <li>复盘样本：来自练习材料的面试复盘。原文注明公司、面试官与对话为虚构，仅用于练习，候选人已去标识化。</li>
-        <li>模拟补充：JD 摘要与「候选人 · 小 L」的回答为 AI 生成的示例，用于补足题量。</li>
-        <li>所有评分与结论都只用于练习，不代表真实录用结果。</li>
-      </ul>
-      <h3>评分规则</h3>
-      <ul class="plain">
-        <li>每题对应一个证据项；候选人选择的回答（或面试官的判断）给出 1 / 3 / 5 分。</li>
-        <li>总分 = Σ（证据项分数 × 权重）÷ 100，满分 5 分。</li>
-        <li>≥ 3.8 为「能用」，3.0–3.8 为「待观察」，< 3.0 为「不匹配」。</li>
-      </ul>
-      <h3>素材与致谢</h3>
-      <ul class="plain">
-        <li>像素地图与建筑：<a href="https://kenney.nl/assets/tiny-town" target="_blank" rel="noopener">Kenney Tiny Town</a>；角色与 NPC：<a href="https://kenney.nl/assets/tiny-dungeon" target="_blank" rel="noopener">Kenney Tiny Dungeon</a>；花丛、篝火、市集棚等装饰：<a href="https://opengameart.org/content/roguelikerpg-pack-1700-tiles" target="_blank" rel="noopener">Kenney Roguelike/RPG Pack</a>。以上均为 CC0 1.0，可自由使用。</li>
-        <li>风格参考星露谷物语的田园像素风，本站未使用星露谷官方素材。</li>
-      </ul>`);
+  /* ---------- 成果展馆 ---------- */
+  const PILL = { '已完成': 'ok', '进行中': 'doing', '待办': 'todo', '已定': 'ok', '待定': 'todo' };
+  const pillCls = s => { for (const k of Object.keys(PILL)) if (String(s).indexOf(k) === 0) return PILL[k]; return 'todo'; };
+  function openShowcase() {
+    if (!REAL) return open('成果展馆', noData());
+    const R = REAL.requirements;
+    const interviewCount = JOBS.filter(interviewable).length;
+    open('成果展馆', `
+      <p class="lead">这里展示需求落定的结果、从复盘里整理出的总结，以及网站和项目的进度。</p>
+      <div class="stat-row">
+        <div class="stat"><b>${JOBS.length}</b><span>真实岗位</span></div>
+        <div class="stat"><b>${interviewCount}</b><span>可模拟问答</span></div>
+        <div class="stat"><b>${JOBS.length - interviewCount}</b><span>仅查看复盘</span></div>
+      </div>
+
+      <h3>🧭 需求落定（来自需求文档）</h3>
+      <blockquote class="quote">${esc(R.one_liner)}</blockquote>
+      <p class="hint">${esc(R.question)}</p>
+      <div class="cards2">${R.deliverables.map(x => `<div class="mini"><b>${esc(x.t)}</b><span class="pill ${pillCls(x.status)}">${esc(x.status)}</span><p>${esc(x.d)}</p></div>`).join('')}</div>
+      <h3>数据怎么来</h3>
+      <ol class="steps">${R.pipeline.map(x => `<li><b>${esc(x.t)}：</b>${esc(x.d)}</li>`).join('')}</ol>
+      <h3>还没拍板的问题</h3>
+      <ul class="todo-list">${R.open_questions.map(x => `<li><span class="pill ${pillCls(x.status)}">${esc(x.status)}</span><div><p>${esc(x.t)}</p></div></li>`).join('')}</ul>
+      <h3>待办</h3>
+      <ul class="todo-list">${R.todo.map(x => `<li><span class="pill ${pillCls(x.status)}">${esc(x.status)}</span><div><b>${esc(x.t)}</b><p>负责人：${esc(x.owner)}</p></div></li>`).join('')}</ul>
+      <p class="hint">${esc(R.mvp)}</p>
+
+      <h3>🪞 复盘总结（通用经验）</h3>
+      <div class="cards2">${REAL.lessons.map(x => `<div class="mini"><b>${esc(x.t)}</b><p>${esc(x.d)}</p></div>`).join('')}</div>
+      <h3>改进计划</h3>
+      <div class="cards2">${REAL.plan.map(p => `<div class="mini"><b>${esc(p.period)}</b><ul class="plain">${p.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>`).join('')}</div>
+
+      <h3>✅ 网站进度</h3>
+      <div class="cards2">${PROJECT_DONE.map(x => `<div class="mini done"><b>${esc(x.t)}</b><p>${esc(x.d)}</p></div>`).join('')}</div>
+
+      <div class="actions">
+        <button class="btn primary" data-go="hall">去模拟面试室</button>
+        <button class="btn" data-go="careers">看职业公告板</button>
+        <button class="btn" data-go="data">数据说明</button>
+      </div>`);
   }
 
-  /* ---------- 广场导览：每个房间与角色的用途 ---------- */
+  /* ---------- 广场导览 ---------- */
   function openGuide() {
     const card = k => `<div class="mini"><b>${esc(ROOMS[k].name)}</b><span class="tagline">${esc(ROOMS[k].short)}</span><p>${esc(ROOMS[k].desc)}</p></div>`;
     open('广场导览', `
@@ -447,40 +488,35 @@ const UI = (function () {
       <div class="cards2">${['teacher', 'guide', 'curator'].map(card).join('')}</div>`);
   }
 
-  /* ---------- 成果展馆：已完成的部分、复盘总结、待办 ---------- */
-  const TODO_CLASS = { '已完成': 'ok', '进行中': 'doing', '待办': 'todo' };
-  function openShowcase() {
-    const doneCount = SHOWCASE.done.length + SHOWCASE.todo.filter(x => x.s === '已完成').length;
-    const total = SHOWCASE.done.length + SHOWCASE.todo.length;
-    const pct = Math.round((doneCount / total) * 100);
-    open('成果展馆', `
-      <p class="lead">这里展示项目目前完成的部分、从复盘里提炼出的通用经验，以及还没做完的待办。</p>
-      <div class="progress-big">
-        <div class="pg-num">${pct}%</div>
-        <div class="pg-text">已完成 ${SHOWCASE.done.length} 个模块 · 待办 ${SHOWCASE.todo.length} 项</div>
-      </div>
-      <div class="bar big"><div style="width:${pct}%"></div></div>
-
-      <h3>✅ 已完成</h3>
-      <div class="cards2">${SHOWCASE.done.map(x => `<div class="mini done"><b>${esc(x.t)}</b><p>${esc(x.d)}</p></div>`).join('')}</div>
-
-      <h3>🧭 复盘总结（通用经验，已去除个人信息）</h3>
-      <div class="cards2">${SHOWCASE.lessons.map(x => `<div class="mini"><b>${esc(x.t)}</b><p>${esc(x.d)}</p></div>`).join('')}</div>
-
-      <h3>📌 待办与下一步</h3>
-      <ul class="todo-list">${SHOWCASE.todo.map(x => `<li>
-        <span class="pill ${TODO_CLASS[x.s] || 'todo'}">${esc(x.s)}</span>
-        <div><b>${esc(x.t)}</b><p>${esc(x.d)}</p></div>
-      </li>`).join('')}</ul>
-
-      <h3>🧰 技术与素材</h3>
-      <ul class="plain">${SHOWCASE.stack.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
-
-      <div class="actions">
-        <button class="btn primary" data-go="hall">去模拟面试室</button>
-        <button class="btn" data-go="report">看报告馆</button>
-        <button class="btn" data-go="data">看数据说明</button>
-      </div>`);
+  /* ---------- 数据说明 ---------- */
+  function openData() {
+    const m = REAL ? REAL.meta : null;
+    open('数据说明', `
+      <h3>数据从哪来</h3>
+      <ul class="plain">
+        <li>${esc(m ? m.source : '真实数据尚未加载')}</li>
+        <li>${esc(m ? m.privacy : '')}</li>
+        <li>${esc(m ? m.note : '')}</li>
+      </ul>
+      <h3>数据怎么来（三步流水线）</h3>
+      <ol class="steps">${REAL ? REAL.requirements.pipeline.map(x => `<li><b>${esc(x.t)}：</b>${esc(x.d)}</li>`).join('') : ''}</ol>
+      <h3>评分规则</h3>
+      <ul class="plain">
+        <li>有复盘原始评分的（如需求分析 4.0、项目真实性 3.5）直接使用。</li>
+        <li>只有判断词的，映射为分数：「证据较充分」= 4，「有一定证据待验证」= 3。没有判断的不打分。</li>
+        <li>模拟面试里，面试官视角的评分与复盘分相差不超过 1 分，记为判断接近。</li>
+        <li>总分 = Σ（能力项分数 × 权重）÷ Σ 权重。≥ 3.8 为「能用」，3.0–3.8 为「待观察」，< 3.0 为「不匹配」。</li>
+      </ul>
+      <h3>本站没有放什么</h3>
+      <ul class="plain">
+        <li>候选人姓名、学校、雇主、联系方式、会议链接与密码。</li>
+        <li>原始 Word / Markdown 文件，以及生成的数据文件本身（不进入代码仓库）。</li>
+      </ul>
+      <h3>素材与致谢</h3>
+      <ul class="plain">
+        <li>像素地图与建筑：<a href="https://kenney.nl/assets/tiny-town" target="_blank" rel="noopener">Kenney Tiny Town</a>；角色与 NPC：<a href="https://kenney.nl/assets/tiny-dungeon" target="_blank" rel="noopener">Kenney Tiny Dungeon</a>；花丛、篝火、市集棚等装饰：<a href="https://opengameart.org/content/roguelikerpg-pack-1700-tiles" target="_blank" rel="noopener">Kenney Roguelike/RPG Pack</a>。以上均为 CC0 1.0。</li>
+        <li>风格参考星露谷物语的田园像素风，本站未使用星露谷官方素材。</li>
+      </ul>`);
   }
 
   /* ---------- 顶部按钮 ---------- */
@@ -502,9 +538,8 @@ const UI = (function () {
   function init() {
     bindHud();
     setRoleBadge();
-    if (!S.role) {
-      setTimeout(() => openIdentity(true), 400);
-    }
+    if (!REAL) World.say('小助手', ['真实数据还没有加载。线上版本部署完成后，这里会显示真实的岗位与复盘。']);
+    else if (!S.role) setTimeout(() => openIdentity(true), 400);
   }
   document.addEventListener('DOMContentLoaded', init);
 

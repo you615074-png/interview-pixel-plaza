@@ -1,0 +1,51 @@
+name: Deploy Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 组装站点（只复制网页文件，真实数据从 secret 注入）
+        env:
+          REAL_DATA_B64: ${{ secrets.REAL_DATA_B64 }}
+        run: |
+          mkdir -p _site
+          cp -r index.html css js assets _site/
+          touch _site/.nojekyll
+          if [ -n "$REAL_DATA_B64" ]; then
+            echo "$REAL_DATA_B64" | base64 -d | gunzip > _site/js/real-data.js
+            echo "已注入真实数据"
+          else
+            echo "::warning::REAL_DATA_B64 未设置，网站不会显示真实数据"
+          fi
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

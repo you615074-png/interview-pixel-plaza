@@ -325,3 +325,24 @@ table.evid th { background: #f1dba8; color: var(--wood-dark); }
 .pill.ok { background: var(--ok); color: #fff; border-color: #2a6226; }
 .pill.doing { background: #f7d77a; color: var(--ink); border-color: var(--warn); }
 .pill.todo { background: #f4e7c3; color: var(--muted); border-color: #c8ad7a; }
+
+/* ---------- 真实数据：判断、表格、统计 ---------- */
+.lv2 { color: var(--ink); background: #f0c27a; border-color: #b0782a; }
+.lv4 { color: #fff; background: #6aa84f; border-color: var(--grass-dark); }
+.verdict-line { font-size: 12.5px; color: var(--muted); border-left: 3px solid #c8ad7a; padding-left: 6px; }
+.verdict-line.ok { border-color: var(--ok); }
+.verdict-line.warn { border-color: var(--warn); }
+.card-foot .can { color: var(--grass-dark); font-weight: 700; }
+.card-foot .view { color: var(--muted); }
+.table-wrap { overflow-x: auto; }
+.table-wrap table.evid { min-width: 520px; }
+.muted { color: var(--muted); font-size: 12.5px; }
+.stat-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 4px; }
+.stat { flex: 1 1 120px; background: #fff8e4; border: 3px solid var(--wood-dark); border-radius: 8px; padding: 8px 10px; text-align: center; box-shadow: inset 0 -3px 0 #e9cf8f; }
+.stat b { display: block; font-family: var(--pixel); font-size: 18px; color: var(--wood-dark); }
+.stat span { font-size: 12.5px; color: var(--muted); }
+.quote { margin: 8px 0; padding: 10px 14px; background: #eaf5dc; border-left: 5px solid var(--grass); border-radius: 6px; font-size: 14.5px; }
+.opts.rate .opt b { color: var(--wood-dark); margin-right: 4px; }
+.pill { white-space: nowrap; }
+.mini .pill { align-self: flex-start; margin: 2px 0; }
+code { background: #f1dba8; padding: 0 4px; border-radius: 3px; }
