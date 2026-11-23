@@ -14,7 +14,7 @@ const UI = (function () {
   };
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const jobById = id => JOBS.find(j => j.id === id);
-  const interviewable = job => job.items.some(it => it.qa && it.qa.length);
+  const interviewable = job => job.items.some(it => (it.qa && it.qa.length) || it.evidence);
   const round2 = x => Math.round(x * 100) / 100;
   const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
   const verdictOf = s => (s == null ? null : s >= PASS ? '能用' : s >= WATCH ? '待观察' : '不匹配');
@@ -62,6 +62,7 @@ const UI = (function () {
     else if (go === 'rate') rate(Number(d.v));
     else if (go === 'next') nextQuestion();
     else if (go === 'copy') copyReport();
+    else if (go === 'image') saveImage();
   }
 
   /* ---------- 身份 ---------- */
@@ -132,7 +133,7 @@ const UI = (function () {
         <td><b>${esc(it.name)}</b><div class="muted">${esc(it.jd)}</div></td>
         <td>${Math.round(w[i] * 100)}%</td>
         <td>${esc(it.judgment || '复盘未给出单独判断')}</td>
-        <td>${it.score == null ? '—' : `<span class="lv lv${Math.round(it.score)}">${it.score.toFixed(1)}</span>`}</td>
+        <td>${it.score == null ? '—' : `<span class="lv lv${Math.round(it.score)}">${it.score.toFixed(1)}</span>${it.score_raw ? `<div class="muted">${esc(it.score_raw)}</div>` : ''}`}</td>
         <td>${esc(it.verify || '—')}</td>
       </tr>`).join('');
     open(job.title, `
@@ -172,7 +173,7 @@ const UI = (function () {
       <p class="hint">只列出有真实问答记录的岗位。候选人视角回放当时的回答与更优答法；面试官视角自己打分，再对照复盘。</p>
       <div class="cards">
         ${list.map(j => {
-          const n = j.items.reduce((a, it) => a + (it.qa ? it.qa.length : 0), 0);
+          const n = j.items.reduce((a, it) => a + ((it.qa && it.qa.length) ? it.qa.length : (it.evidence ? 1 : 0)), 0);
           return `<button class="card" data-go="start" data-id="${esc(j.id)}">
             <div class="card-title">${esc(j.title)}</div>
             <div class="card-sub">${esc(j.org)}</div>
@@ -185,7 +186,10 @@ const UI = (function () {
   /* ---------- 模拟面试 ---------- */
   function queueOf(job) {
     const q = [];
-    job.items.forEach(it => (it.qa || []).forEach(qa => q.push({ item: it, qa })));
+    job.items.forEach(it => {
+      if (it.qa && it.qa.length) it.qa.forEach(qa => q.push({ item: it, qa }));
+      else if (it.evidence) q.push({ item: it, qa: { q: '请根据这一项的表现做判断：' + it.jd, answer: it.evidence, verifies: null, problem: it.problem, better: it.better, q_src: '复盘整理的提问' } });
+    });
     return q;
   }
   function startInterview(id) {
@@ -211,7 +215,7 @@ const UI = (function () {
       <div class="progress"><span>第 ${ss.i + 1} / ${ss.queue.length} 题</span><span class="muted">${esc(job.title)}</span></div>
       <div class="ev">证据项：<b>${esc(it.name)}</b>（权重 ${pctW(job, idx)}%）· 岗位要求：${esc(it.jd)}</div></div>`;
     const title = ss.role === 'candidate' ? '模拟面试 · 候选人视角' : '模拟面试 · 面试官视角';
-    const q = bubble('周老师（面试官）', qa.q);
+    const q = bubble('周老师（面试官）', qa.q) + (qa.q_src ? `<div class="qsrc">${esc(qa.q_src)}</div>` : '');
     const real = bubble('候选人（复盘记录的原始回答）', qa.answer, 'cand');
     const next = `<div class="actions"><button class="btn primary" data-go="next">${ss.i + 1 < ss.queue.length ? '下一题' : '生成解析报告'}</button></div>`;
 
@@ -309,7 +313,7 @@ const UI = (function () {
         id: it.id, name: it.name, w: Math.round(w[i] * 100), jd: it.jd,
         judgment: it.judgment || '复盘未给出单独判断', verify: it.verify || '',
         reviewer: it.score, basis: it.score_basis || null, user: userAvg,
-        answer: it.qa && it.qa[0] ? it.qa[0].answer : null
+        answer: it.qa && it.qa[0] ? it.qa[0].answer : (it.evidence || null)
       };
     });
     const reviewer = rw ? round2(rs / rw) : null;
@@ -400,12 +404,13 @@ const UI = (function () {
       <h3>可追溯说明</h3>
       <div class="src">
         <p>结论基于：${esc(r.source)}</p>
-        <p>评分口径：有复盘原始评分的直接使用；只有判断词的，按「证据较充分=4、有一定证据待验证=3」映射（见数据说明）。</p>
+        <p>评分口径：有复盘原始评分的直接使用（10 分制折半）；只有判断词的，按「证据较充分=4、有一定证据待验证=3、有具体不匹配证据=2」映射（见数据说明）。</p>
         <p>本报告只用于练习，不代表任何企业的录用结果。</p>
       </div>
 
       <div class="actions">
         <button class="btn" data-go="copy">复制文字成绩单</button>
+        <button class="btn" data-go="image">保存成绩单图片</button>
         <button class="btn" data-go="hall">再练一次</button>
         <button class="btn" data-go="careers">返回公告板</button>
       </div>
@@ -433,6 +438,73 @@ const UI = (function () {
     const fail = () => { if (tip) tip.textContent = '复制失败，请手动选择文字。'; };
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fail);
     else fail();
+  }
+
+  /* ---------- 成绩单图片（Canvas，本地生成，不上传） ---------- */
+  function wrapText(ctx, text, x, y, maxW, lh) {
+    let line = '', lines = 0;
+    for (const ch of String(text || '')) {
+      const test = line + ch;
+      if (ctx.measureText(test).width > maxW && line) { ctx.fillText(line, x, y + lines * lh); line = ch; lines++; }
+      else line = test;
+    }
+    if (line) ctx.fillText(line, x, y + lines * lh);
+    return y + (lines + 1) * lh;
+  }
+  function saveImage() {
+    const r = S.last;
+    const tip = document.getElementById('copy-tip');
+    if (!r) return;
+    const W = 720, pad = 28;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    // 先估算高度
+    const rowH = 46;
+    const H = 330 + r.rows.length * rowH + 150;
+    canvas.width = W * 2; canvas.height = H * 2; ctx.scale(2, 2);
+    ctx.fillStyle = '#fbf0d4'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = '#5a3a1f'; ctx.lineWidth = 6; ctx.strokeRect(3, 3, W - 6, H - 6);
+    ctx.fillStyle = '#5a3a1f'; ctx.font = 'bold 22px "PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillText('面试成绩单', pad, 46);
+    ctx.font = '16px "PingFang SC","Microsoft YaHei",sans-serif'; ctx.fillStyle = '#3b2412';
+    let y = wrapText(ctx, r.title, pad, 76, W - pad * 2, 22);
+    ctx.font = 'bold 40px "PingFang SC","Microsoft YaHei",sans-serif'; ctx.fillStyle = '#5a3a1f';
+    ctx.fillText((r.reviewer == null ? '—' : r.reviewer.toFixed(2)) + ' / 5', pad, y + 40);
+    ctx.font = '15px "PingFang SC","Microsoft YaHei",sans-serif'; ctx.fillStyle = '#3b2412';
+    const lab = r.mode === 'interviewer' ? `复盘结论：${r.reviewerLabel || '—'}　你的结论：${r.verdict || '—'}` : `结论：${r.reviewerLabel || '—'}`;
+    ctx.fillText(lab, pad + 200, y + 34);
+    let yy = y + 80;
+    ctx.font = 'bold 15px "PingFang SC","Microsoft YaHei",sans-serif'; ctx.fillStyle = '#5a3a1f';
+    ctx.fillText('能力项', pad, yy); ctx.fillText('权重', pad + 300, yy); ctx.fillText('复盘分', pad + 370, yy);
+    if (r.mode === 'interviewer') ctx.fillText('你的评分', pad + 460, yy);
+    yy += 10; ctx.fillStyle = '#c9a46a'; ctx.fillRect(pad, yy, W - pad * 2, 2); yy += 18;
+    ctx.font = '14px "PingFang SC","Microsoft YaHei",sans-serif'; ctx.fillStyle = '#3b2412';
+    r.rows.forEach(x => {
+      ctx.fillText(String(x.name).slice(0, 16), pad, yy);
+      ctx.fillText(x.w + '%', pad + 300, yy);
+      ctx.fillText(x.reviewer == null ? '—' : x.reviewer.toFixed(1), pad + 370, yy);
+      if (r.mode === 'interviewer') ctx.fillText(x.user == null ? '—' : x.user.toFixed(1), pad + 460, yy);
+      ctx.font = '12px "PingFang SC","Microsoft YaHei",sans-serif'; ctx.fillStyle = '#7a5a3b';
+      ctx.fillText(String(x.judgment).slice(0, 36), pad, yy + 18);
+      ctx.font = '14px "PingFang SC","Microsoft YaHei",sans-serif'; ctx.fillStyle = '#3b2412';
+      yy += rowH;
+    });
+    yy += 10;
+    ctx.font = 'bold 15px "PingFang SC","Microsoft YaHei",sans-serif'; ctx.fillStyle = '#5a3a1f';
+    ctx.fillText('面试官结论', pad, yy);
+    ctx.font = '14px "PingFang SC","Microsoft YaHei",sans-serif'; ctx.fillStyle = '#3b2412';
+    yy = wrapText(ctx, interviewerConclusion(r), pad, yy + 24, W - pad * 2, 21);
+    ctx.font = '11px "PingFang SC","Microsoft YaHei",sans-serif'; ctx.fillStyle = '#7a5a3b';
+    wrapText(ctx, '数据来源：' + r.source + '。练习性判断，不代表任何企业的录用结果。', pad, H - 26, W - pad * 2, 16);
+    canvas.toBlob(blob => {
+      if (!blob) { if (tip) tip.textContent = '图片生成失败。'; return; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `成绩单-${r.jobId}.png`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      if (tip) tip.textContent = '已生成图片（在本机下载，未上传）。';
+    }, 'image/png');
   }
 
   /* ---------- 成果展馆 ---------- */
@@ -503,7 +575,8 @@ const UI = (function () {
       <h3>评分规则</h3>
       <ul class="plain">
         <li>有复盘原始评分的（如需求分析 4.0、项目真实性 3.5）直接使用。</li>
-        <li>只有判断词的，映射为分数：「证据较充分」= 4，「有一定证据待验证」= 3。没有判断的不打分。</li>
+        <li>只有判断词的，映射为分数：「证据较充分」= 4，「有一定证据待验证」= 3，「有具体不匹配证据」= 2。「证据不足暂无法判断」和没有判断的不打分。</li>
+        <li>10 分制的原始分（如黄国靖的各模块得分）统一换算为 5 分制（÷ 2），原始分保留在表格里。</li>
         <li>模拟面试里，面试官视角的评分与复盘分相差不超过 1 分，记为判断接近。</li>
         <li>总分 = Σ（能力项分数 × 权重）÷ Σ 权重。≥ 3.8 为「能用」，3.0–3.8 为「待观察」，< 3.0 为「不匹配」。</li>
       </ul>
